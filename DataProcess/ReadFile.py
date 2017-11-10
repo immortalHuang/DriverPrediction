@@ -1,14 +1,14 @@
+# -*- coding: utf-8 -*-
 import os
 
 import pandas as pd
+from pyspark.ml.linalg import VectorUDT
+from pyspark.mllib.regression import LabeledPoint
 from pyspark.sql import SparkSession
+from pyspark.sql.types import StructField, StructType, DoubleType
 from sklearn import svm
 #
-OriginTrainData = pd.read_csv("../Data/train.csv")
-OriginTestData = pd.read_csv("../Data/test.csv")
 
-TrainDataY = OriginTrainData.pop('target')
-OriginTrainData.insert(0,'target',TrainDataY)
 
 
 #
@@ -21,19 +21,40 @@ OriginTrainData.insert(0,'target',TrainDataY)
 # print result.head()
 
 from pyspark.ml.classification import LinearSVC
+from pyspark.sql import SQLContext
+
 
 spark = SparkSession \
     .builder \
     .appName("linearSVC") \
-    .getOrCreate() \
-    .master("spark://127.0.1.1:7077")
+    .master("local[4]") \
+    .getOrCreate()
+
+sqlContext = SQLContext(spark)
+
+sc = spark.sparkContext
 
 
-lsvc = LinearSVC(maxIter=10, regParam=0.1)
+DataStruct = StructType([StructField("label", DoubleType(), True),StructField("features", VectorUDT(), True)])
+TrainData = spark.read.csv(
+    "../Data/train.csv", header=True, mode="DROPMALFORMED"
+)
 
-lsvcModel = lsvc.fit(OriginTrainData)
 
-print("Coefficients: " + str(lsvcModel.coefficients))
-print("Intercept: " + str(lsvcModel.intercept))
+TrainData.withColumn('id2',TrainData.id+1)
+
+
+OriginTestData = sc.textFile("../Data/test.csv")
+TestData = spark.read.csv(
+    "../Data/test.csv", header=True, mode="DROPMALFORMED"
+)
+
+
+# lsvc = LinearSVC(maxIter=10, regParam=0.1)
+#
+# lsvcModel = lsvc.fit(TrainData)
+#
+# print("Coefficients: " + str(lsvcModel.coefficients))
+# print("Intercept: " + str(lsvcModel.intercept))
 
 spark.stop()
