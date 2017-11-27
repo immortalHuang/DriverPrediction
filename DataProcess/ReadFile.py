@@ -1,36 +1,53 @@
 # -*- coding: utf-8 -*-
-from pyspark.mllib.regression import LabeledPoint
-from pyspark.mllib.tree import DecisionTree
+from pyspark.ml import Pipeline
+from pyspark.ml.classification import DecisionTreeClassifier
+from pyspark.ml.feature import VectorAssembler, StringIndexer, VectorIndexer, IndexToString
 from pyspark.sql import SparkSession
+from pyspark.sql.types import StructField, DoubleType, StructType, FloatType, Row
+import sys
+
+reload(sys)
+sys.setdefaultencoding('utf-8')
 
 spark = SparkSession \
     .builder \
     .appName("linearSVC") \
-    .master("spark://127.0.1.1:7077") \
-    .config("spark.driver.memory","1g") \
+    .master("local[*]") \
+    .config("spark.driver.memory","3g") \
     .getOrCreate()
 
 sc = spark.sparkContext
 
+dataFile = sc.textFile("../Data/train.csv").map(lambda e : e.split(',')).map(lambda e:
+                                                                             tuple([x if e[0]=='id' else float(x) for x in e ])).collect()
 
-OriginTrainData = sc.textFile("../Data/train.csv").map(lambda x:x.split(',')).filter(lambda x:x[0]!='id').map(lambda x:LabeledPoint(x[1],[float(x[i]) for i in range(0,len(x)-1) if i!=1 and i!=0]))
-# SparkTrainData = spark.createDataFrame(OriginTrainData,['label','features'])
+tempScheme = []
+for field in dataFile[0]:
+    schemeType = StructField(field, FloatType(), True)
+    tempScheme.append(schemeType)
+schema = StructType(tempScheme)
 
-(trainingData, testData) = OriginTrainData.randomSplit([0.7, 0.3])
+data = spark.createDataFrame(dataFile[1:],schema)
+# data.createOrReplaceTempView("data")
 
-model = DecisionTree.trainRegressor(trainingData, categoricalFeaturesInfo={0:2},
-                                    impurity='variance', maxDepth=5, maxBins=32)
+assembler = VectorAssembler().setInputCols(dataFile[0][2:]).setOutputCol("features")
+vecDF = assembler.transform(data)
 
-predictions = model.predict(testData.map(lambda x:x.features))
+labelIndexer = StringIndexer(inputCol="target", outputCol="indexedLabel").fit(vecDF)
+featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures").fit(vecDF)
 
-print predictions.collect()
-# lsvc = LinearSVC(maxIter=10, regParam=0.1)
-#
-# lsvcModel = lsvc.fit(SparkTrainData)
-#
-# result = lsvcModel.pre
-#
-# print("Coefficients: " + str(lsvcModel.coefficients))
-# print("Intercept: " + str(lsvcModel.intercept))
+(trainingData, testData) = vecDF.randomSplit([0.7, 0.3])
+
+dt = DecisionTreeClassifier(labelCol="indexedLabel", featuresCol="indexedFeatures",maxBins=100,
+                            impurity="entropy",minInfoGain=0.01,minInstancesPerNode=10,seed=123456)
+
+labelConverter = IndexToString(inputCol="prediction", outputCol="predictedLabel").setLabels(labelIndexer.labels)
+
+pipeline = Pipeline(stages=[labelIndexer, featureIndexer, dt, labelConverter])
+model = pipeline.fit(trainingData)
+
+predictions = model.transform(testData)
+
+predictions.select("predictedLabel", "target", "features").show(10, truncate = False)
 
 spark.stop()
