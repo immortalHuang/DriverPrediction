@@ -21,22 +21,29 @@ sc = spark.sparkContext
 dataFile = sc.textFile("../Data/train.csv").map(lambda e : e.split(',')).map(lambda e:
                                                                              tuple([x if e[0]=='id' else float(x) for x in e ])).collect()
 
+testFile = sc.textFile("../Data/test.csv").map(lambda e : e.split(',')).map(lambda e:
+                                                                             tuple([x if e[0]=='id' else float(x) for x in e ])).collect()
+
 tempScheme = []
 for field in dataFile[0]:
     schemeType = StructField(field, FloatType(), True)
     tempScheme.append(schemeType)
 schema = StructType(tempScheme)
 
+testSchema = StructType(tempScheme[2:] + tempScheme[0:1])
+
 data = spark.createDataFrame(dataFile[1:],schema)
+tdata = spark.createDataFrame(testFile[1:],testSchema)
 # data.createOrReplaceTempView("data")
 
 assembler = VectorAssembler().setInputCols(dataFile[0][2:]).setOutputCol("features")
 vecDF = assembler.transform(data)
+testData = VectorAssembler().setInputCols(testFile[0][1:]).setOutputCol("features").transform(tdata)
 
 labelIndexer = StringIndexer(inputCol="target", outputCol="indexedLabel").fit(vecDF)
 featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures").fit(vecDF)
 
-(trainingData, testData) = vecDF.randomSplit([0.7, 0.3])
+trainingData = vecDF
 
 dt = DecisionTreeClassifier(labelCol="indexedLabel", featuresCol="indexedFeatures",maxBins=100,
                             impurity="entropy",minInfoGain=0.01,minInstancesPerNode=10,seed=123456)
@@ -48,6 +55,6 @@ model = pipeline.fit(trainingData)
 
 predictions = model.transform(testData)
 
-predictions.select("predictedLabel", "target", "features").show(10, truncate = False)
+# predictions.select("predictedLabel", "target", "features").show(10, truncate = False)
 
 spark.stop()
